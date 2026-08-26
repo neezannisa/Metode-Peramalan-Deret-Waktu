@@ -1,0 +1,380 @@
+---
+title: "Untitled"
+author: "Annisa Marwah"
+date: "2026-08-26"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# LIBRARY
+```{r}
+library(forecast)
+library(graphics)
+library(TTR)
+library(TSA)
+library(readxl)
+library(ggplot2)
+```
+
+# IMPORT DATA
+```{r}
+# Impor dataset dari file Excel
+data_penumpang <- read_excel("Data Pilihan MPDW.xlsx", sheet = "Sheet1")
+
+# Menampilkan 6 baris pertama data
+head(data_penumpang)
+```
+
+# EKPLORASI DATA
+```{r}
+# Struktur dan dimensi data
+str(data_penumpang)
+dim(data_penumpang)
+
+# Mengubah variabel Jumlah_Penumpang menjadi objek deret waktu (time series)
+penumpang.ts <- ts(data_penumpang$Jumlah_Penumpang)
+
+# Ringkasan statistik deskriptif
+summary(penumpang.ts)
+```
+## Plot Deret Waktu Keseluruhan
+
+```{r}
+ts.plot(penumpang.ts, xlab = "Periode Waktu", ylab = "Jumlah Penumpang", 
+        main = "Time Series Plot - Jumlah Penumpang")
+points(penumpang.ts, pch = 20, col = "darkblue", cex = 0.6)
+```
+Berdasarkan plot deret waktu di atas, data Jumlah_Penumpang berfluktuasi pada rentang sekitar 41.658 hingga 68.622 dengan rata-rata 58.687 penumpang per periode. Terlihat adanya pola osilasi periodik yang berulang dan dinamis di sekitar nilai tengahnya tanpa adanya lonjakan tren linear jangka panjang yang ekstrem.
+
+# SMA & DMA
+
+## Pembagian Data Latih dan Data Uji
+Pembagian data dilakukan dengan proporsi 80% data latih (training) dan 20% data uji (testing). Dengan total $N = 100$ observasi, data latih terdiri atas 80 observasi pertama dan data uji terdiri atas 20 observasi terakhir.
+
+### Menghitung jumlah observasi
+```{r}
+n <- nrow(data_penumpang)
+n_train <- floor(0.8 * n)
+n_test  <- n - n_train
+
+# Pembagian data frame
+training_ma <- data_penumpang[1:n_train, ]
+testing_ma  <- data_penumpang[(n_train + 1):n, ]
+
+# Konversi ke objek time series
+train_ma.ts <- ts(training_ma$Jumlah_Penumpang)
+test_ma.ts  <- ts(testing_ma$Jumlah_Penumpang)
+
+cat("Jumlah observasi total :", n, "\n")
+cat("Jumlah data latih      :", n_train, "\n")
+cat("Jumlah data uji        :", n_test, "\n")
+```
+
+### Visualisasi pembagian data latih dan uji
+```{r}
+ggplot() + 
+  geom_line(data = training_ma, aes(x = Periode, y = Jumlah_Penumpang, col = "Data Latih"), linewidth = 0.8) +
+  geom_line(data = testing_ma, aes(x = Periode, y = Jumlah_Penumpang, col = "Data Uji"), linewidth = 0.8) +
+  labs(x = "Periode Waktu", y = "Jumlah Penumpang", color = "Keterangan:") +
+  scale_colour_manual(breaks = c("Data Latih", "Data Uji"), values = c("blue", "red")) + 
+  theme_bw() + 
+  theme(legend.position = "bottom")
+```
+
+## Single Moving Average (SMA)
+Metode pemulusan Single Moving Average (SMA) merata-ratakan $m$ data periode terakhir untuk memperkirakan nilai satu periode ke depan. Pada pemodelan ini digunakan ordo 
+$m = 4$.$$S_t = \frac{1}{m} \sum_{i=t-m+1}^{t} X_i$$
+```{r}
+# Pemulusan SMA ordo m = 4
+m <- 4
+data.sma <- SMA(train_ma.ts, n = m)
+
+# Nilai ramalan 1 langkah ke depan
+data.ramal <- c(NA, data.sma)
+
+# Peramalan sepanjang horizon data uji (20 periode ke depan)
+data.gab <- cbind(
+  aktual    = c(penumpang.ts),
+  pemulusan = c(data.sma, rep(NA, n_test)),
+  ramalan   = c(data.ramal, rep(data.ramal[length(data.ramal)], n_test - 1))
+)
+
+head(data.gab, 10)
+```
+
+### Plot hasil pemulusan dan peramalan SMA
+```{r}
+par(mar = c(6, 4, 4, 2) + 0.1)
+ts.plot(penumpang.ts, xlab = "Periode Waktu", ylab = "Jumlah Penumpang", 
+        main = "Pemulusan SMA (m = 4) - Data Penumpang")
+lines(data.gab[, 2], col = "green", lwd = 2)
+lines(data.gab[, 3], col = "red", lwd = 2)
+
+
+legend("bottom",
+       legend = c("Data Aktual", "Data Pemulusan", "Data Peramalan"),
+       lty = 1,
+       col = c("black", "green", "red"),
+       cex = 0.8,
+       horiz = TRUE,
+       bty = "n")
+```
+## Evaluasi Akurasi SMA
+
+### Akurasi Data Latih SMA
+```{r}
+error_train.sma <- train_ma.ts - data.ramal[1:length(train_ma.ts)]
+idx_valid_train <- (m + 1):length(train_ma.ts)
+
+SSE_train.sma  <- sum(error_train.sma[idx_valid_train]^2)
+MSE_train.sma  <- mean(error_train.sma[idx_valid_train]^2)
+RMSE_train.sma <- sqrt(MSE_train.sma)
+MAPE_train.sma <- mean(abs((error_train.sma[idx_valid_train] / train_ma.ts[idx_valid_train])) * 100)
+
+akurasi_train.sma <- matrix(c(SSE_train.sma, MSE_train.sma, RMSE_train.sma, MAPE_train.sma), ncol = 1)
+rownames(akurasi_train.sma) <- c("SSE", "MSE", "RMSE", "MAPE (%)")
+colnames(akurasi_train.sma) <- paste0("SMA (m = ", m, ")")
+akurasi_train.sma
+```
+### Akurasi Data Uji SMA
+```{r}
+error_test.sma <- test_ma.ts - data.gab[(n_train + 1):n, 3]
+
+SSE_test.sma  <- sum(error_test.sma^2)
+MSE_test.sma  <- mean(error_test.sma^2)
+RMSE_test.sma <- sqrt(MSE_test.sma)
+MAPE_test.sma <- mean(abs((error_test.sma / test_ma.ts) * 100))
+
+akurasi_test.sma <- matrix(c(SSE_test.sma, MSE_test.sma, RMSE_test.sma, MAPE_test.sma), ncol = 1)
+rownames(akurasi_test.sma) <- c("SSE", "MSE", "RMSE", "MAPE (%)")
+colnames(akurasi_test.sma) <- paste0("SMA (m = ", m, ")")
+akurasi_test.sma
+```
+Pemulusan SMA ordo $m = 4$ menghasilkan nilai MAPE pada data latih dan data uji di bawah 10%, yang mengindikasikan kemampuan peramalan yang sangat baik (highly accurate forecasting). Namun, nilai ramalan jangka panjang SMA bersifat konstan/datar (flatline).
+
+## Double Moving Average (DMA)
+Metode Double Moving Average (DMA) melakukan pemulusan dua kali berturut-turut untuk mengakomodasi adanya kecenderungan pola tren linier.
+$$S_{1,t} = \frac{1}{m} \sum_{i=t-m+1}^{t} X_i, \quad S_{2,t} = \frac{1}{m} \sum_{i=t-m+1}^{t} S_{1,i}$$$$A_t = 2S_{1,t} - S_{2,t}, \quad B_t = \frac{2}{m-1}(S_{1,t} - S_{2,t})$$
+```{r}
+# Pemulusan tahap 2
+dma <- SMA(data.sma, n = m)
+At  <- 2 * data.sma - dma
+Bt  <- (2 / (m - 1)) * (data.sma - dma)
+data.dma    <- At + Bt
+data.ramal2 <- c(NA, data.dma)
+
+# Peramalan sepanjang data uji (n_test periode)
+f_dma <- numeric(n_test)
+for (i in 1:n_test) {
+  f_dma[i] <- At[length(At)] + Bt[length(Bt)] * i
+}
+
+data.gab2 <- cbind(
+  aktual     = c(penumpang.ts), 
+  pemulusan1 = c(data.sma, rep(NA, n_test)),
+  pemulusan2 = c(dma, rep(NA, n_test)),
+  At         = c(At, rep(NA, n_test)), 
+  Bt         = c(Bt, rep(NA, n_test)),
+  ramalan    = c(data.ramal2, f_dma[-1])
+)
+
+head(data.gab2, 12)
+```
+### Plot hasil DMA
+```{r}
+par(mar = c(6, 4, 4, 2) + 0.1)
+ts.plot(penumpang.ts, xlab = "Periode Waktu", ylab = "Jumlah Penumpang", 
+        main = "Pemulusan DMA (m = 4) - Data Penumpang")
+lines(data.gab2[, 3], col = "green", lwd = 2)
+lines(data.gab2[, 6], col = "red", lwd = 2)
+legend("bottom",
+       legend = c("Data Aktual", "Data Pemulusan", "Data Peramalan"),
+       lty = 1,
+       col = c("black", "green", "red"),
+       cex = 0.8,
+       horiz = TRUE,
+       bty = "n")
+```
+## Evaluasi Akurasi DMA
+```{r}
+# Akurasi Data Latih DMA
+error_train.dma <- train_ma.ts - data.ramal2[1:length(train_ma.ts)]
+idx_valid_dma   <- (2 * m):length(train_ma.ts)
+
+SSE_train.dma  <- sum(error_train.dma[idx_valid_dma]^2)
+MSE_train.dma  <- mean(error_train.dma[idx_valid_dma]^2)
+RMSE_train.dma <- sqrt(MSE_train.dma)
+MAPE_train.dma <- mean(abs((error_train.dma[idx_valid_dma] / train_ma.ts[idx_valid_dma])) * 100)
+
+akurasi_train.dma <- matrix(c(SSE_train.dma, MSE_train.dma, RMSE_train.dma, MAPE_train.dma), ncol = 1)
+rownames(akurasi_train.dma) <- c("SSE", "MSE", "RMSE", "MAPE (%)")
+colnames(akurasi_train.dma) <- paste0("DMA (m = ", m, ")")
+akurasi_train.dma
+```
+```{r}
+# Akurasi Data Uji DMA
+error_test.dma <- test_ma.ts - data.gab2[(n_train + 1):n, 6]
+
+SSE_test.dma  <- sum(error_test.dma^2)
+MSE_test.dma  <- mean(error_test.dma^2)
+RMSE_test.dma <- sqrt(MSE_test.dma)
+MAPE_test.dma <- mean(abs((error_test.dma / test_ma.ts) * 100))
+
+akurasi_test.dma <- matrix(c(SSE_test.dma, MSE_test.dma, RMSE_test.dma, MAPE_test.dma), ncol = 1)
+rownames(akurasi_test.dma) <- c("SSE", "MSE", "RMSE", "MAPE (%)")
+colnames(akurasi_test.dma) <- paste0("DMA (m = ", m, ")")
+akurasi_test.dma
+```
+
+# SES & DES
+
+##Single Exponential Smoothing (SES)
+
+Metode SES memberikan bobot yang menurun secara eksponensial terhadap pengamatan historis, sangat sesuai untuk data stasioner.
+$$\tilde{y}_t = \alpha y_t + (1 - \alpha)\tilde{y}_{t-1}$$
+```{r}
+# Model SES dengan parameter coba-coba (alpha = 0.2 dan alpha = 0.7) serta Optimum
+ses1   <- HoltWinters(train_ma.ts, alpha = 0.2, beta = FALSE, gamma = FALSE)
+ses2   <- HoltWinters(train_ma.ts, alpha = 0.7, beta = FALSE, gamma = FALSE)
+sesopt <- HoltWinters(train_ma.ts, alpha = NULL, beta = FALSE, gamma = FALSE)
+
+# Ramalan sepanjang horizon data uji (20 periode)
+ramalan1   <- forecast(ses1, h = n_test)
+ramalan2   <- forecast(ses2, h = n_test)
+ramalanopt <- forecast(sesopt, h = n_test)
+
+cat("Nilai Alpha Optimum SES:", sesopt$alpha, "\n")
+```
+```{r}
+# Plot hasil SES Optimum
+plot(ramalanopt, main = "Peramalan SES (Alpha Optimum)")
+```
+## Akurasi SES Data Latih dan Uji
+
+### Akurasi Data Latih SES
+```{r}
+SSE_train_ses1   <- ses1$SSE
+MSE_train_ses1   <- SSE_train_ses1 / length(train_ma.ts)
+RMSE_train_ses1  <- sqrt(MSE_train_ses1)
+
+SSE_train_ses2   <- ses2$SSE
+MSE_train_ses2   <- SSE_train_ses2 / length(train_ma.ts)
+RMSE_train_ses2  <- sqrt(MSE_train_ses2)
+
+SSE_train_sesopt  <- sesopt$SSE
+MSE_train_sesopt  <- SSE_train_sesopt / length(train_ma.ts)
+RMSE_train_sesopt <- sqrt(MSE_train_sesopt)
+```
+### Akurasi Data Uji SES
+```{r}
+acc_ses1   <- accuracy(ramalan1, as.numeric(test_ma.ts))
+acc_ses2   <- accuracy(ramalan2, as.numeric(test_ma.ts))
+acc_sesopt <- accuracy(ramalanopt, as.numeric(test_ma.ts))
+
+tabel_akurasi_ses <- rbind(
+  "SES (alpha = 0.2)" = acc_ses1["Test set", c("RMSE", "MAE", "MAPE")],
+  "SES (alpha = 0.7)" = acc_ses2["Test set", c("RMSE", "MAE", "MAPE")],
+  "SES (Optimum)"     = acc_sesopt["Test set", c("RMSE", "MAE", "MAPE")]
+)
+as.data.frame(tabel_akurasi_ses)
+```
+
+## Double Exponential Smoothing (DES / Metode Holt)
+Metode DES mengakomodasi unsur level ($\alpha$) dan trend ($\beta$).
+
+```{r}
+# Model DES Holt-Winters
+des.1   <- HoltWinters(train_ma.ts, alpha = 0.2, beta = 0.2, gamma = FALSE)
+des.2   <- HoltWinters(train_ma.ts, alpha = 0.6, beta = 0.3, gamma = FALSE)
+des.opt <- HoltWinters(train_ma.ts, alpha = NULL, beta = NULL, gamma = FALSE)
+
+# Ramalan sepanjang horizon data uji (20 periode)
+ramalandes1   <- forecast(des.1, h = n_test)
+ramalandes2   <- forecast(des.2, h = n_test)
+ramalandesopt <- forecast(des.opt, h = n_test)
+
+cat("Nilai Alpha Optimum DES:", des.opt$alpha, "\n")
+cat("Nilai Beta Optimum DES :", des.opt$beta, "\n")
+```
+### Plot Hasil Pemodelan DES Optimum
+```{r}
+plot(ramalandesopt, main = "Peramalan DES Holt (Alpha & Beta Optimum)")
+```
+## Akurasi DES Data Uji
+```{r}
+# Evaluasi Akurasi DES pada Data Uji
+acc_des1   <- accuracy(ramalandes1, as.numeric(test_ma.ts))
+acc_des2   <- accuracy(ramalandes2, as.numeric(test_ma.ts))
+acc_desopt <- accuracy(ramalandesopt, as.numeric(test_ma.ts))
+
+tabel_akurasi_des <- rbind(
+  "DES (0.2 ; 0.2)" = acc_des1["Test set", c("RMSE", "MAE", "MAPE")],
+  "DES (0.6 ; 0.3)" = acc_des2["Test set", c("RMSE", "MAE", "MAPE")],
+  "DES (Optimum)"   = acc_desopt["Test set", c("RMSE", "MAE", "MAPE")]
+)
+as.data.frame(tabel_akurasi_des)
+```
+
+# Pemulusan Data Musiman: Holt-Winters
+Karena data jumlah penumpang transportasi harian memiliki pola siklus mingguan (7 hari), data deret waktu dimodelkan menggunakan frekuensi musiman mingguan ($s = 7$).
+```{r}
+# Mengatur frekuensi musiman mingguan (frequency = 7)
+train_season.ts <- ts(training_ma$Jumlah_Penumpang, frequency = 7)
+test_season.ts  <- ts(testing_ma$Jumlah_Penumpang, frequency = 7)
+```
+
+## Holt-Winters Aditif
+Model musiman aditif sesuai jika variasi musiman berfluktuasi secara relatif konstan di sekitar level tren.
+
+```{r}
+# Pemulusan Holt-Winters Aditif
+winter_add     <- HoltWinters(train_season.ts, alpha = 0.2, beta = 0.1, gamma = 0.1, seasonal = "additive")
+winter_add_opt <- HoltWinters(train_season.ts, seasonal = "additive")
+
+# Peramalan sepanjang data uji
+ramalan_add     <- forecast(winter_add, h = n_test)
+ramalan_add_opt <- forecast(winter_add_opt, h = n_test)
+
+plot(ramalan_add_opt, main = "Peramalan Holt-Winters Aditif Optimum (Siklus 7 Hari)")
+```
+## Holt-Winters Multiplikatif
+Model multiplikatif sesuai jika amplitudo musiman bervariasi proporsional terhadap perubahan level data.
+```{r}
+# Pemulusan Holt-Winters Multiplikatif
+winter_mult     <- HoltWinters(train_season.ts, alpha = 0.2, beta = 0.1, gamma = 0.3, seasonal = "multiplicative")
+winter_mult_opt <- HoltWinters(train_season.ts, seasonal = "multiplicative")
+
+# Peramalan sepanjang data uji
+ramalan_mult     <- forecast(winter_mult, h = n_test)
+ramalan_mult_opt <- forecast(winter_mult_opt, h = n_test)
+
+plot(ramalan_mult_opt, main = "Peramalan Holt-Winters Multiplikatif Optimum (Siklus 7 Hari)")
+```
+# Perbandingan Seluruh Metode
+Berikut adalah tabel rekapitulasi evaluasi akurasi peramalan pada data uji (testing set) untuk menentukan metode terbaik:
+```{r}
+# Menghitung akurasi model musiman Holt-Winters
+acc_hw_add  <- accuracy(ramalan_add_opt, as.numeric(test_season.ts))
+acc_hw_mult <- accuracy(ramalan_mult_opt, as.numeric(test_season.ts))
+
+# Rekapitulasi perbandingan akurasi
+rekap_evaluasi <- rbind(
+  "SMA (m = 4)"           = c(RMSE = RMSE_test.sma, MAE = mean(abs(error_test.sma)), MAPE = MAPE_test.sma),
+  "DMA (m = 4)"           = c(RMSE = RMSE_test.dma, MAE = mean(abs(error_test.dma)), MAPE = MAPE_test.dma),
+  "SES (Optimum)"         = acc_sesopt["Test set", c("RMSE", "MAE", "MAPE")],
+  "DES (Optimum)"         = acc_desopt["Test set", c("RMSE", "MAE", "MAPE")],
+  "Holt-Winters Aditif"   = acc_hw_add["Test set", c("RMSE", "MAE", "MAPE")],
+  "Holt-Winters Multipl." = acc_hw_mult["Test set", c("RMSE", "MAE", "MAPE")]
+)
+
+# Menampilkan tabel perbandingan
+as.data.frame(round(rekap_evaluasi, 3))
+```
+
+# KESIMPULAN
+Metode Terbaik:
+
+Metode Holt-Winters Seasonal (khususnya model Aditif/Multiplikatif dengan parameter optimum) terbukti menghasilkan performa yang paling unggul dan konsisten pada data uji karena mampu memodelkan komponen level, trend, dan efek musiman siklis mingguan secara simultan.
