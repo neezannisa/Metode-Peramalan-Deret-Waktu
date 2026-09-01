@@ -1,0 +1,246 @@
+---
+title: "Tugas"
+author: "Annisa Marwah"
+date: "2026-09-01"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(readxl)
+library(lmtest)
+library(dplyr)
+library(TTR)
+library(forecast)
+library(orcutt)
+library(HoRM)
+```
+
+# MARKET SHARE & PRICE
+
+## Input Data
+```{r}
+data <- read_excel("Data 1 tugas praktikum 2.xlsx")
+data
+```
+
+## Plot Deret Waktu
+
+Sebelum melakukan regresi, akan diperlihatkan plot time-series dari Market share dan Price pada periode 1-20.
+```{r}
+data.ts1<-ts(data$`Market share`)
+data.ts1
+data.ts2<-ts(data$Price)
+data.ts2
+```
+Berikut adalah Time Series Plot dari variabel Market share
+```{r}
+ts.plot(data.ts1, xlab="Time Period ", ylab="Market share", main= "Time Series Plot of Market share")
+points(data.ts1)
+```
+Berikut adalah Time Series Plot dari variabel Price
+```{r}
+ts.plot(data.ts2, xlab="Time Period ", ylab="Price", main= "Time Series Plot of Price")
+points(data.ts2)
+```
+
+## Model Regresi Awal (OLS)
+
+```{r}
+model1 <- lm(`Market share` ~ Price, data = data)
+summary(model1)
+```
+
+Model yang terbentuk (dari hasil summary):
+
+$$
+\widehat{MarketShare} = 26.91 - 24.29 \times Price
+$$
+(R-sq = 0.951) 
+
+Berdasarkan model regresi yang terbentuk, setiap kenaikan 1 satuan Price akan menyebabkan Market Share menurun sebesar 24,29 satuan, dengan asumsi faktor lain tetap. Sementara itu, nilai \(R^2 = 0,9511\) menunjukkan bahwa 95,11% variasi Market Share dapat dijelaskan oleh variabel Price, sedangkan 4,89% sisanya dijelaskan oleh faktor lain di luar model.
+
+## Pemeriksaan Asumsi Autokorelasi
+
+### Plot sisaan terhadap waktu
+
+```{r}
+sisaan1 <- residuals(model1)
+par(mfrow = c(1, 2))
+plot(data$Period, sisaan1, type = "o", pch = 19, col = "darkgreen",
+     main = "Plot Sisaan vs Waktu (Model Awal)",
+     xlab = "Periode", ylab = "Sisaan")
+abline(h = 0, lty = 2, col = "red")
+
+plot(sisaan1[-length(sisaan1)], sisaan1[-1], pch = 19, col = "darkorange",
+     main = "Sisaan(t) vs Sisaan(t-1)",
+     xlab = "Sisaan ke-t", ylab = "Sisaan ke-(t+1)")
+abline(h = 0, v = 0, lty = 2)
+par(mfrow = c(1, 1))
+```
+Pola sisaan yang bergelombang/berkelanjutan (tidak acak) mengindikasikan kemungkinan autokorelasi positif.
+
+### Uji Durbin-Watson
+
+```{r}
+dwtest(model1)
+```
+Berdasarkan Uji Durbin-Watson, diperoleh nilai DW = 1,1358 dengan p-value = 0,009813. Karena p-value < 0,05, maka tolak $$H_0$$. Artinya, terdapat autokorelasi positif pada residual model, sehingga asumsi tidak adanya autokorelasi belum terpenuhi.
+
+## Penanganan Autokorelasi dengan Cochrane-Orcutt
+
+```{r}
+model_co <- cochrane.orcutt(model1)
+summary(model_co)
+```
+Cochrane-Orcutt melakukan differencing tergeneralisasi:
+$$Y*_t = Y_t - rho \times Y_{(t-1)} ,  X*_t = X_t - rho \times X_{(t-1)}$$
+dengan rho diestimasi dari otokorelasi lag-1 sisaan (rho_hat = 0.418),lalu meregresikan Y* terhadap X*.
+
+Model setelah koreksi
+$$
+MarketShare^{*} = 26.74 - 24.10 \times Price^{*}
+$$      
+(rho_hat = 0.418)
+
+Durbin-Watson setelah koreksi naik menjadi ~1.95 (mendekati 2),
+sudah berada pada daerah "tidak ada autokorelasi" (DW > dU = 1.41).
+
+### Uji Durbin-Watson pada model terkoreksi
+
+```{r}
+sisaan_co <- model_co$residuals
+dw_after <- sum(diff(sisaan_co)^2) / sum(sisaan_co^2)
+cat("Durbin-Watson setelah Cochrane-Orcutt :", round(dw_after, 3), "\n")
+```
+
+### Plot sisaan model terkoreksi
+
+```{r}
+plot(sisaan_co, type = "o", pch = 19, col = "purple",
+     main = "Plot Sisaan Model Setelah Cochrane-Orcutt",
+     xlab = "Periode", ylab = "Sisaan")
+abline(h = 0, lty = 2, col = "red")
+```
+
+Nilai DW naik dari 1.136 menjadi ~1.95 , sudah berada di atas dU (1.41)
+dan mendekati 2 — menunjukkan masalah autokorelasi pada sisaan sudah teratasi.
+
+# SALES & ADVERTISING
+
+## Input Data
+```{r}
+dt <- read_excel("Data 2 tugas praktikum.xlsx")
+dt
+```
+
+## Plot Deret Waktu
+
+Sebelum melakukan regresi, akan diperlihatkan plot time-series dari Sales dan Advertising pada periode 1975-2014.
+```{r}
+dt.ts1<-ts(dt$Sales)
+dt.ts1
+dt.ts2<-ts(dt$Advertising)
+dt.ts2
+```
+Berikut adalah Time Series Plot dari variabel Sales
+```{r}
+ts.plot(dt.ts1, xlab="Time Period ", ylab="Sales", main= "Time Series Plot of Sales")
+points(dt.ts1)
+```
+Berikut adalah Time Series Plot dari variabel Advertising
+```{r}
+ts.plot(dt.ts2, xlab="Time Period ", ylab="Advertising", main= "Time Series Plot of Advertising")
+points(dt.ts2)
+```
+## Model Regresi Awal (OLS)
+
+```{r}
+model2 <- lm(Sales ~ Advertising, data = dt)
+summary(model2)
+```
+
+Model yang terbentuk:
+
+$$\widehat{Sales} = 5.965 + 0.710 \times Advertising$$
+(R² ≈ 0.960)
+
+Berdasarkan model regresi yang terbentuk, setiap kenaikan 1 satuan Advertising akan menyebabkan Sales meningkat sebesar 0,710 satuan. Selain itu, nilai $$R^2 = 0,9591$$ menunjukkan bahwa 95,91% variasi Sales dapat dijelaskan oleh variabel Advertising, sedangkan 4,09% sisanya dijelaskan oleh faktor lain di luar model.
+
+## Pemeriksaan Asumsi Autokorelasi
+
+### Plot sisaan terhadap waktu
+
+```{r}
+sisaan3 <- residuals(model2)
+
+par(mfrow = c(1, 2))
+plot(dt$Year, sisaan3, type = "o", pch = 19, col = "darkgreen",
+     main = "Plot Sisaan vs Waktu (Model Awal)",
+     xlab = "Tahun", ylab = "Sisaan")
+abline(h = 0, lty = 2, col = "red")
+
+plot(sisaan3[-length(sisaan3)], sisaan3[-1], pch = 19, col = "darkorange",
+     main = "Sisaan(t) vs Sisaan(t-1)",
+     xlab = "Sisaan ke-t", ylab = "Sisaan ke-(t+1)")
+abline(h = 0, v = 0, lty = 2)
+par(mfrow = c(1, 1))
+```
+
+Plot sisaan terhadap waktu memperlihatkan pola bergelombang/berkesinambungan
+(sisaan positif cenderung diikuti sisaan positif lagi, begitu pula sisaan
+negatif) — indikasi kuat adanya autokorelasi positif.
+
+### Uji Durbin-Watson
+
+```{r}
+dwtest(model2)
+```
+
+Berdasarkan Uji Durbin-Watson, diperoleh nilai DW = 0,16096 dengan p-value < 2,2 × 10⁻¹⁶. Karena p-value < 0,05, maka tolak $$H_0$$. Artinya, terdapat autokorelasi positif yang signifikan pada residual model, sehingga asumsi tidak adanya autokorelasi belum terpenuhi.
+
+## Penanganan Autokorelasi dengan Cochrane-Orcutt
+
+```{r}
+model_co2 <- cochrane.orcutt(model2)
+summary(model_co2)
+```
+
+Metode Cochrane-Orcutt melakukan differencing tergeneralisasi:
+
+$$Sales^*_t = Sales_t - \rho \, Sales_{t-1}, \qquad
+Advertising^*_t = Advertising_t - \rho \, Advertising_{t-1}$$
+
+dengan $\hat{\rho}$ diestimasi dari otokorelasi lag-1 sisaan model awal
+($\hat{\rho} \approx 0.893$ — sangat tinggi, konsisten dengan DW awal yang
+sangat rendah).
+
+Model setelah koreksi:
+
+$$\widehat{Sales^*} = 9.888 + 0.504 \times Advertising^*$$
+
+Catatan: R² model terkoreksi turun (≈ 0.58) dibanding model awal (≈ 0.96).
+Ini **normal** — sebagian besar R² tinggi pada model awal justru berasal dari
+tren bersama (autokorelasi) yang belum dikoreksi, bukan dari hubungan
+struktural murni antara Sales dan Advertising.
+
+### Uji Durbin-Watson pada model terkoreksi
+```{r}
+sisaan_co2 <- model_co2$residuals
+dw_after2 <- sum(diff(sisaan_co2)^2) / sum(sisaan_co2^2)
+cat("Durbin-Watson setelah Cochrane-Orcutt :", round(dw_after, 3), "\n")
+```
+
+### Plot sisaan model terkoreksi
+```{r}
+plot(sisaan_co2, type = "o", pch = 19, col = "purple",
+     main = "Plot Sisaan Model Setelah Cochrane-Orcutt",
+     xlab = "Indeks Waktu", ylab = "Sisaan")
+abline(h = 0, lty = 2, col = "red")
+```
+
+Nilai DW naik dari 0.162 menjadi ≈ 1.94, sudah berada di atas dU (1.54)
+dan mendekati 2 — menunjukkan masalah autokorelasi pada sisaan sudah teratasi.
