@@ -1,0 +1,98 @@
+---
+title: "Prak 6 dan 7 MPDW"
+author: "Annisa Marwah"
+date: "2026-09-30"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+```{r}
+library(readxl)
+library(forecast)
+library(tseries)
+library(ggplot2)
+```
+
+
+# Input Data
+```{r}
+data <- read_excel("Data Pilihan MPDW.xlsx")
+data
+```
+
+# Pre-processing
+```{r}
+y <- data$Jumlah_Penumpang
+
+sum(is.na(y))
+y <- na.omit(y)
+```
+```{r}
+y_ts <- ts(y, 
+           start = c(2020, 1), 
+           frequency = 12)
+
+plot(y_ts,
+     main = "Plot Data Time Series",
+     xlab = "Waktu",
+     ylab = "Nilai")
+```
+# Uji stasioneritas
+```{r}
+adf.test(y_ts)
+```
+Hasil ADF Test menunjukkan p-value = 0.01 < 0.05, sehingga H₀ ditolak. Data y_ts stasioner dan tidak memerlukan differencing.
+
+```{r}
+Acf(y_ts,
+    main = "ACF Data Awal")
+
+Pacf(y_ts,
+     main = "PACF Data Awal")
+```
+Pada plot ACF Data Awal, beberapa spike melewati batas signifikansi (garis biru), terutama pada lag 1, 7, 14, dan 15. Hal ini menunjukkan adanya autokorelasi yang signifikan pada beberapa lag, sehingga nilai saat ini memiliki hubungan dengan nilai pada periode sebelumnya.
+
+Pada plot PACF Data Awal, terdapat beberapa spike yang melewati batas signifikansi, terutama pada lag 1, 6, 7, 14, 20, dan 22. Hal ini menunjukkan adanya pengaruh langsung yang signifikan dari beberapa periode sebelumnya terhadap nilai saat ini.
+
+
+# Menentukan Model ARIMA
+```{r}
+model_auto <- auto.arima(y_ts)
+summary(model_auto)
+```
+Model yang diperoleh adalah ARIMA(0,0,1) dengan nilai MA(1) sebesar 0,3853. Nilai AIC = 2011,15 dan BIC = 2018,97 dapat digunakan untuk membandingkan model dengan kandidat lainnya. Pada data training, RMSE = 5464,52, MAE = 4419,65, dan MAPE = 7,92%, sehingga rata-rata kesalahan relatif model sekitar 7,92%.
+
+# Cek Residual
+```{r}
+model <- Arima(y_ts, order = c(0,0,1))
+summary(model)
+```
+Model ARIMA(0,0,1) memiliki nilai MA(1) = 0,3853. Nilai AIC = 2011,15 dan BIC = 2018,97 menunjukkan kriteria pemilihan model. Berdasarkan data training, model menghasilkan MAPE = 7,92%, sehingga rata-rata kesalahan prediksi sekitar 7,92%.
+
+
+```{r}
+checkresiduals(model)
+```
+```{r}
+Box.test(residuals(model),
+         lag = 10,
+         type = "Ljung-Box")
+```
+# FOrecasting
+```{r}
+forecast_arima <- forecast(model, h = 12)
+forecast_arima
+```
+Hasil uji Ljung-Box menunjukkan p-value = 0,06866 > 0,05, sehingga H₀ tidak ditolak. Artinya, residual tidak memiliki autokorelasi yang signifikan, sehingga model ARIMA(0,0,1) layak digunakan untuk forecasting.
+
+
+```{r}
+autoplot(forecast_arima) +
+  ggtitle("Forecasting dengan ARIMA(0,0,1)") +
+  xlab("Waktu") +
+  ylab("Nilai")
+```
+Hasil uji Ljung-Box menunjukkan p-value = 0,06866 > 0,05, sehingga residual tidak memiliki autokorelasi yang signifikan. Dengan demikian, model ARIMA(0,0,1) layak digunakan untuk forecasting.
+
